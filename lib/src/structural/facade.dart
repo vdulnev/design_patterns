@@ -182,3 +182,5 @@ void facadeExample() {
 
   print('');
 }
+
+void main() => facadeExample();

@@ -200,3 +200,5 @@ void strategyExample() {
 
   print('');
 }
+
+void main() => strategyExample();

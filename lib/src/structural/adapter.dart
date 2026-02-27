@@ -163,3 +163,5 @@ Future<void> adapterExample() async {
 
   print('');
 }
+
+Future<void> main() => adapterExample();

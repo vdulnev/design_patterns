@@ -253,3 +253,5 @@ void chainOfResponsibilityExample() {
 
   print('');
 }
+
+void main() => chainOfResponsibilityExample();

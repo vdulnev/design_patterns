@@ -164,3 +164,5 @@ void compositeExample() {
 
   print('');
 }
+
+void main() => compositeExample();

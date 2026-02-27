@@ -172,3 +172,5 @@ void iteratorExample() {
 
   print('');
 }
+
+void main() => iteratorExample();

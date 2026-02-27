@@ -208,3 +208,5 @@ void commandExample() {
 
   print('');
 }
+
+void main() => commandExample();

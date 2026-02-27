@@ -144,3 +144,5 @@ void factoryMethodExample() {
 
   print('');
 }
+
+void main() => factoryMethodExample();

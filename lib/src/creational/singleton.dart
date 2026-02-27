@@ -175,3 +175,5 @@ void singletonExample() {
 
   print('');
 }
+
+void main() => singletonExample();

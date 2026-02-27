@@ -166,3 +166,5 @@ void abstractFactoryExample() {
 
   print('');
 }
+
+void main() => abstractFactoryExample();

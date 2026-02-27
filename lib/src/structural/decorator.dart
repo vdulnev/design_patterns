@@ -169,3 +169,5 @@ void decoratorExample() {
 
   print('');
 }
+
+void main() => decoratorExample();

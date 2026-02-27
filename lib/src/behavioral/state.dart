@@ -211,3 +211,5 @@ void stateExample() {
 
   print('');
 }
+
+void main() => stateExample();

@@ -162,3 +162,5 @@ void observerExample() {
 
   print('');
 }
+
+void main() => observerExample();

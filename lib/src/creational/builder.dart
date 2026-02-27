@@ -164,3 +164,5 @@ void builderExample() {
 
   print('');
 }
+
+void main() => builderExample();

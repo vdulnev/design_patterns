@@ -156,3 +156,5 @@ void templateMethodExample() {
 
   print('');
 }
+
+void main() => templateMethodExample();

@@ -1,24 +1,24 @@
 library;
 
 // Creational
-export 'src/creational/singleton.dart';
-export 'src/creational/factory_method.dart';
-export 'src/creational/abstract_factory.dart';
-export 'src/creational/builder.dart';
-export 'src/creational/prototype.dart';
+export 'src/creational/singleton.dart' hide main;
+export 'src/creational/factory_method.dart' hide main;
+export 'src/creational/abstract_factory.dart' hide main;
+export 'src/creational/builder.dart' hide main;
+export 'src/creational/prototype.dart' hide main;
 
 // Structural
-export 'src/structural/adapter.dart';
-export 'src/structural/decorator.dart';
-export 'src/structural/facade.dart';
-export 'src/structural/proxy.dart';
-export 'src/structural/composite.dart';
+export 'src/structural/adapter.dart' hide main;
+export 'src/structural/decorator.dart' hide main;
+export 'src/structural/facade.dart' hide main;
+export 'src/structural/proxy.dart' hide main;
+export 'src/structural/composite.dart' hide main;
 
 // Behavioral
-export 'src/behavioral/observer.dart';
-export 'src/behavioral/strategy.dart';
-export 'src/behavioral/command.dart';
-export 'src/behavioral/state.dart';
-export 'src/behavioral/template_method.dart';
-export 'src/behavioral/iterator.dart';
-export 'src/behavioral/chain_of_responsibility.dart';
+export 'src/behavioral/observer.dart' hide main;
+export 'src/behavioral/strategy.dart' hide main;
+export 'src/behavioral/command.dart' hide main;
+export 'src/behavioral/state.dart' hide main;
+export 'src/behavioral/template_method.dart' hide main;
+export 'src/behavioral/iterator.dart' hide main;
+export 'src/behavioral/chain_of_responsibility.dart' hide main;

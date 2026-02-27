@@ -157,3 +157,5 @@ void prototypeExample() {
 
   print('');
 }
+
+void main() => prototypeExample();

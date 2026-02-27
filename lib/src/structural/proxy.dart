@@ -188,3 +188,5 @@ void proxyExample() {
 
   print('');
 }
+
+void main() => proxyExample();
