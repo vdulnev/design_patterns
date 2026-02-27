@@ -13,9 +13,9 @@
 //   UI event propagation, auth/validation pipelines
 //
 // Key points in Dart:
-// - Each handler has a reference to the next handler (successor)
+// - Each handler has a final reference to the next handler (successor)
+// - Successor is injected via the constructor — immutable after creation
 // - A handler either handles the request or passes it to the next
-// - Fluent API (setNext returning the next handler) makes chaining readable
 
 // ─────────────────────────────────────────────
 // Example 1: HTTP Middleware pipeline
@@ -40,16 +40,12 @@ class HttpContext {
 }
 
 abstract class Middleware {
-  Middleware? _next;
+  final Middleware? _next;
 
-  // Fluent chain builder
-  Middleware setNext(Middleware next) {
-    _next = next;
-    return next;
-  }
+  const Middleware([this._next]);
 
   void handle(HttpContext ctx) {
-    if (_next != null) _next!.handle(ctx);
+    _next?.handle(ctx);
   }
 }
 
@@ -57,7 +53,7 @@ class RateLimiterMiddleware extends Middleware {
   final int maxRequests;
   int _count = 0;
 
-  RateLimiterMiddleware({this.maxRequests = 5});
+  RateLimiterMiddleware({this.maxRequests = 5, Middleware? next}) : super(next);
 
   @override
   void handle(HttpContext ctx) {
@@ -76,7 +72,8 @@ class RateLimiterMiddleware extends Middleware {
 
 class AuthMiddleware extends Middleware {
   final List<String> _validTokens;
-  AuthMiddleware(this._validTokens);
+
+  AuthMiddleware(this._validTokens, {Middleware? next}) : super(next);
 
   @override
   void handle(HttpContext ctx) {
@@ -94,6 +91,8 @@ class AuthMiddleware extends Middleware {
 }
 
 class LoggingMiddleware extends Middleware {
+  const LoggingMiddleware({Middleware? next}) : super(next);
+
   @override
   void handle(HttpContext ctx) {
     print('  [Log] → ${ctx.method} ${ctx.path}');
@@ -103,6 +102,8 @@ class LoggingMiddleware extends Middleware {
 }
 
 class RouterMiddleware extends Middleware {
+  const RouterMiddleware() : super(null);
+
   @override
   void handle(HttpContext ctx) {
     ctx.body = switch (ctx.path) {
@@ -126,18 +127,15 @@ class SupportTicket {
 }
 
 abstract class SupportHandler {
-  SupportHandler? _next;
+  final SupportHandler? _next;
 
-  SupportHandler setNext(SupportHandler next) {
-    _next = next;
-    return next;
-  }
+  const SupportHandler([this._next]);
 
   void handle(SupportTicket ticket);
 
   void escalate(SupportTicket ticket) {
     if (_next != null) {
-      _next!.handle(ticket);
+      _next.handle(ticket);
     } else {
       print('  [$runtimeType] No handler available — ticket dropped: "${ticket.issue}"');
     }
@@ -145,6 +143,8 @@ abstract class SupportHandler {
 }
 
 class Level1Support extends SupportHandler {
+  const Level1Support([super.next]);
+
   @override
   void handle(SupportTicket ticket) {
     if (ticket.priority <= 1) {
@@ -157,6 +157,8 @@ class Level1Support extends SupportHandler {
 }
 
 class Level2Support extends SupportHandler {
+  const Level2Support([super.next]);
+
   @override
   void handle(SupportTicket ticket) {
     if (ticket.priority <= 2) {
@@ -169,6 +171,8 @@ class Level2Support extends SupportHandler {
 }
 
 class EngineeringTeam extends SupportHandler {
+  const EngineeringTeam([super.next]);
+
   @override
   void handle(SupportTicket ticket) {
     if (ticket.priority <= 3) {
@@ -181,6 +185,8 @@ class EngineeringTeam extends SupportHandler {
 }
 
 class CTO extends SupportHandler {
+  const CTO() : super(null);
+
   @override
   void handle(SupportTicket ticket) {
     print('  [CTO] Personally handling critical issue: "${ticket.issue}"');
@@ -196,16 +202,16 @@ void chainOfResponsibilityExample() {
   print('CHAIN OF RESPONSIBILITY PATTERN');
   print('═' * 50);
 
-  // Build middleware chain
-  final rateLimiter = RateLimiterMiddleware(maxRequests: 2);
-  final logger      = LoggingMiddleware();
-  final auth        = AuthMiddleware(['Bearer token123', 'Bearer admin456']);
-  final router      = RouterMiddleware();
-
-  rateLimiter
-    .setNext(logger)
-    .setNext(auth)
-    .setNext(router);
+  // Build middleware chain via constructor injection (inside-out)
+  final chain = RateLimiterMiddleware(
+    maxRequests: 2,
+    next: LoggingMiddleware(
+      next: AuthMiddleware(
+        ['Bearer token123', 'Bearer admin456'],
+        next: const RouterMiddleware(),
+      ),
+    ),
+  );
 
   void request(String method, String path, {String? token}) {
     print('\n${'-' * 35}');
@@ -214,7 +220,7 @@ void chainOfResponsibilityExample() {
       path: path,
       headers: token != null ? {'Authorization': token} : {},
     );
-    rateLimiter.handle(ctx);
+    chain.handle(ctx);
     print('  Result: $ctx');
   }
 
@@ -223,12 +229,15 @@ void chainOfResponsibilityExample() {
   request('GET', '/users');           // no token → 401
   request('GET', '/users', token: 'Bearer token123'); // rate limit hit
 
-  // Support ticket chain
+  // Support ticket chain — also constructed inside-out
   print('\n[Support Escalation Chain]');
-  final l1 = Level1Support();
-  l1.setNext(Level2Support())
-    .setNext(EngineeringTeam())
-    .setNext(CTO());
+  const l1 = Level1Support(
+    Level2Support(
+      EngineeringTeam(
+        CTO(),
+      ),
+    ),
+  );
 
   final tickets = [
     SupportTicket('Password reset', 1),
