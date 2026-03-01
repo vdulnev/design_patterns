@@ -9,50 +9,37 @@
 // - Examples: Vending machine, traffic light, order lifecycle, media player,
 //   network connection (connecting/open/closed)
 //
-// Key points in Dart:
-// - State interface defines behaviour for each state
-// - Context holds current state and delegates to it
-// - Each state knows what the next state should be (or context decides)
+// Key points — sealed-class variant (Dart 3+):
+// - `sealed` enforces exhaustiveness: every switch must cover all subtypes
+//   or the compiler emits an error (no runtime surprises when adding states)
+// - State subtypes are pure immutable data — no back-reference to context
+// - Context owns ALL transition logic via exhaustive switch statements
+// - Compare to abstract-class variant: state objects called back into the
+//   context to mutate it; sealed variant inverts that — context reads state
 
 // ─────────────────────────────────────────────
-// Context forward declaration
+// Sealed state hierarchy
+//
+// Each subtype carries only the data relevant to that state.
 // ─────────────────────────────────────────────
 
-class VendingMachine {
-  late VendingState _state;
-  double _balance = 0;
-  final Map<String, VendingProduct> _inventory = {};
+sealed class VendingState {
+  const VendingState();
+}
 
-  VendingMachine() {
-    _state = IdleState(this);
-    _inventory['A1'] = VendingProduct('Cola', 1.50, 5);
-    _inventory['B2'] = VendingProduct('Chips', 2.00, 3);
-  }
+class IdleState extends VendingState {
+  const IdleState();
+}
 
-  // State transitions
-  void transitionTo(VendingState state) {
-    print('  [State] → ${state.runtimeType}');
-    _state = state;
-  }
+class HasMoneyState extends VendingState {
+  final double balance;
+  const HasMoneyState(this.balance);
+}
 
-  // Public API — delegated to current state
-  void insertCoin(double amount) => _state.insertCoin(amount);
-  void selectProduct(String code)  => _state.selectProduct(code);
-  void dispense()                  => _state.dispense();
-  void cancel()                    => _state.cancel();
-
-  // Helpers for states
-  double get balance => _balance;
-  void addBalance(double amount) => _balance += amount;
-  void resetBalance() => _balance = 0;
-
-  VendingProduct? getProduct(String code) => _inventory[code];
-  void decrementProduct(String code) {
-    final p = _inventory[code];
-    if (p != null) p.stock--;
-  }
-
-  String? selectedCode;
+class DispensingState extends VendingState {
+  final String code;
+  final double balance;
+  const DispensingState({required this.code, required this.balance});
 }
 
 // ─────────────────────────────────────────────
@@ -67,120 +54,110 @@ class VendingProduct {
 }
 
 // ─────────────────────────────────────────────
-// State interface
+// Context
+//
+// Owns state, inventory, and all transition logic.
+// Exhaustive switches guarantee every state is handled — the compiler
+// rejects a missing case if a new VendingState subtype is added.
 // ─────────────────────────────────────────────
 
-abstract class VendingState {
-  final VendingMachine machine;
-  VendingState(this.machine);
+class VendingMachine {
+  VendingState _state = const IdleState();
+  final Map<String, VendingProduct> _inventory = {};
 
-  void insertCoin(double amount);
-  void selectProduct(String code);
-  void dispense();
-  void cancel();
-}
-
-// ─────────────────────────────────────────────
-// Concrete states
-// ─────────────────────────────────────────────
-
-class IdleState extends VendingState {
-  IdleState(super.machine);
-
-  @override
-  void insertCoin(double amount) {
-    machine.addBalance(amount);
-    print('  Inserted \$${amount.toStringAsFixed(2)}. Balance: \$${machine.balance.toStringAsFixed(2)}');
-    machine.transitionTo(HasMoneyState(machine));
+  VendingMachine() {
+    _inventory['A1'] = VendingProduct('Cola', 1.50, 5);
+    _inventory['B2'] = VendingProduct('Chips', 2.00, 3);
   }
 
-  @override
-  void selectProduct(String code) =>
-      print('  Please insert coins first.');
-
-  @override
-  void dispense() => print('  Please insert coins and select a product.');
-
-  @override
-  void cancel() => print('  Nothing to cancel.');
-}
-
-class HasMoneyState extends VendingState {
-  HasMoneyState(super.machine);
-
-  @override
-  void insertCoin(double amount) {
-    machine.addBalance(amount);
-    print('  Added \$${amount.toStringAsFixed(2)}. Balance: \$${machine.balance.toStringAsFixed(2)}');
+  void _transition(VendingState next) {
+    print('  [State] ${_state.runtimeType} → ${next.runtimeType}');
+    _state = next;
   }
 
-  @override
+  // ── insertCoin ──────────────────────────────
+
+  void insertCoin(double amount) {
+    switch (_state) {
+      case IdleState():
+        print('  Inserted \$${amount.toStringAsFixed(2)}.'
+            ' Balance: \$${amount.toStringAsFixed(2)}');
+        _transition(HasMoneyState(amount));
+      case HasMoneyState(:final balance):
+        final newBalance = balance + amount;
+        print('  Added \$${amount.toStringAsFixed(2)}.'
+            ' Balance: \$${newBalance.toStringAsFixed(2)}');
+        _transition(HasMoneyState(newBalance));
+      case DispensingState():
+        print('  Please wait — dispensing in progress.');
+    }
+  }
+
+  // ── selectProduct ───────────────────────────
+
   void selectProduct(String code) {
-    final product = machine.getProduct(code);
-    if (product == null) {
-      print('  Unknown product code: $code');
-      return;
+    switch (_state) {
+      case IdleState():
+        print('  Please insert coins first.');
+      case HasMoneyState(:final balance):
+        final product = _inventory[code];
+        if (product == null) {
+          print('  Unknown product code: $code');
+          return;
+        }
+        if (product.stock == 0) {
+          print('  ${product.name} is sold out.');
+          return;
+        }
+        if (balance < product.price) {
+          print('  Insufficient balance.'
+              ' Need \$${product.price.toStringAsFixed(2)},'
+              ' have \$${balance.toStringAsFixed(2)}');
+          return;
+        }
+        print('  Selected: ${product.name}'
+            ' (\$${product.price.toStringAsFixed(2)})');
+        _transition(DispensingState(code: code, balance: balance));
+        _dispense(); // immediately dispense after transitioning
+      case DispensingState():
+        print('  Please wait — dispensing in progress.');
     }
-    if (product.stock == 0) {
-      print('  ${product.name} is sold out.');
-      return;
-    }
-    if (machine.balance < product.price) {
-      print('  Insufficient balance. Need \$${product.price.toStringAsFixed(2)}, have \$${machine.balance.toStringAsFixed(2)}');
-      return;
-    }
-    machine.selectedCode = code;
-    print('  Selected: ${product.name} (\$${product.price.toStringAsFixed(2)})');
-    machine.transitionTo(DispensingState(machine));
-    machine.dispense(); // trigger dispense now that state is set
   }
 
-  @override
-  void dispense() => print('  Select a product first.');
+  // ── cancel ──────────────────────────────────
 
-  @override
   void cancel() {
-    final refund = machine.balance;
-    machine.resetBalance();
-    print('  Cancelled. Refunding \$${refund.toStringAsFixed(2)}');
-    machine.transitionTo(IdleState(machine));
+    switch (_state) {
+      case IdleState():
+        print('  Nothing to cancel.');
+      case HasMoneyState(:final balance):
+        print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
+        _transition(const IdleState());
+      case DispensingState():
+        print('  Cannot cancel — already dispensing.');
+    }
   }
-}
 
-class DispensingState extends VendingState {
-  DispensingState(super.machine);
+  // ── _dispense (private — only valid in DispensingState) ─────────────────
 
-  @override
-  void insertCoin(double amount) => print('  Please wait — dispensing in progress.');
-
-  @override
-  void selectProduct(String code) => print('  Please wait — dispensing in progress.');
-
-  @override
-  void dispense() {
-    final code    = machine.selectedCode!;
-    final product = machine.getProduct(code)!;
-    final change  = machine.balance - product.price;
+  void _dispense() {
+    // Pattern-match to extract state data; non-Dispensing is unreachable here.
+    final DispensingState(:code, :balance) = _state as DispensingState;
+    final product = _inventory[code]!;
+    final change  = balance - product.price;
 
     print('  Dispensing ${product.name}...');
-    machine.decrementProduct(code);
-    machine.resetBalance();
-    machine.selectedCode = null;
+    product.stock--;
 
     if (change > 0) {
       print('  Change returned: \$${change.toStringAsFixed(2)}');
     }
-
-    final remaining = machine.getProduct(code)!.stock;
-    if (remaining == 0) {
+    if (product.stock == 0) {
       print('  ${product.name} now out of stock.');
     }
 
-    machine.transitionTo(IdleState(machine));
+    _transition(const IdleState());
   }
-
-  @override
-  void cancel() => print('  Cannot cancel — already dispensing.');
 }
 
 // ─────────────────────────────────────────────
@@ -189,7 +166,7 @@ class DispensingState extends VendingState {
 
 void stateExample() {
   print('═' * 50);
-  print('STATE PATTERN');
+  print('STATE PATTERN  (sealed-class variant)');
   print('═' * 50);
 
   final vm = VendingMachine();
