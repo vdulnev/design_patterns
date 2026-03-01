@@ -132,6 +132,26 @@ class LoggingDecorator extends DataSourceDecorator {
 }
 
 // ─────────────────────────────────────────────
+// Fluent builder extension
+//
+// Extensions cannot override existing methods, so they cannot BE decorators.
+// But they can CONSTRUCT decorators, giving a left-to-right chain that
+// reads in the same order as execution:
+//
+//   FileDataSource('f').compress().encrypt().logged()
+//
+// is exactly equivalent to:
+//
+//   LoggingDecorator(EncryptionDecorator(CompressionDecorator(FileDataSource('f'))))
+// ─────────────────────────────────────────────
+
+extension DataSourceDecorators on DataSource {
+  DataSource encrypt()  => EncryptionDecorator(this);
+  DataSource compress() => CompressionDecorator(this);
+  DataSource logged()   => LoggingDecorator(this);
+}
+
+// ─────────────────────────────────────────────
 // Example runner
 // ─────────────────────────────────────────────
 
@@ -166,6 +186,15 @@ void decoratorExample() {
   full.write(message);
   final result = full.read();
   print('  Final value: "$result"');
+
+  // Same stack, built with the fluent extension API
+  print('\n[Fluent extension chain — identical result]');
+  final fluent = FileDataSource('data2.bin')
+      .compress()
+      .encrypt()
+      .logged();
+  fluent.write(message);
+  print('  Final value: "${fluent.read()}"');
 
   print('');
 }
