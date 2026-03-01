@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // # Observer Pattern
 //
 // Intent: Define a one-to-many dependency between objects so that when one
@@ -105,6 +107,34 @@ class AuditLogObserver implements StockObserver {
 }
 
 // ─────────────────────────────────────────────
+// Dart built-in #1: StreamController (dart:async)
+//
+// StreamController<T>.broadcast() is Dart's canonical observable:
+//   stream.listen(fn)     → subscribe   (returns StreamSubscription)
+//   controller.add(value) → notify all listeners
+//   subscription.cancel() → unsubscribe
+//   controller.close()    → dispose
+//
+// sync: true makes callbacks fire immediately inside add(), keeping the
+// example output deterministic without async/await.
+// ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// Dart built-in #2: ValueNotifier / ChangeNotifier (package:flutter)
+//
+// Flutter ships ValueNotifier<T> and ChangeNotifier which implement
+// the same pattern at the widget layer:
+//   notifier.addListener(fn)    → subscribe
+//   notifier.value = x          → notify (ValueNotifier)
+//   notifier.notifyListeners()  → notify (ChangeNotifier)
+//   notifier.removeListener(fn) → unsubscribe
+//
+// Not demonstrated here because this is a pure-Dart package, but the
+// pattern is identical — Flutter just integrates it with the widget tree
+// via ListenableBuilder / ValueListenableBuilder.
+// ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
 // Bonus: Dart-idiomatic observer using callbacks
 // ─────────────────────────────────────────────
 
@@ -159,6 +189,27 @@ void observerExample() {
   clicks.on((btn) => print('  Button "$btn" clicked!'));
   clicks.emit('Submit');
   clicks.emit('Cancel');
+
+  // ── Dart built-in: StreamController.broadcast ─────────────────────────
+  print('\n[Dart built-in: StreamController.broadcast (sync)]');
+  final controller = StreamController<double>.broadcast(sync: true);
+
+  final subA = controller.stream.listen(
+    (price) => print('  [Stream A] price = \$${price.toStringAsFixed(2)}'),
+  );
+  final subB = controller.stream.listen(
+    (price) => print('  [Stream B] price = \$${price.toStringAsFixed(2)}'),
+  );
+
+  controller.add(99.99);   // both A and B notified
+  controller.add(105.00);  // both A and B notified
+
+  subB.cancel();           // unsubscribe B
+  print('  (Stream B unsubscribed)');
+  controller.add(110.00);  // only A notified
+
+  subA.cancel();
+  controller.close();
 
   print('');
 }
