@@ -154,7 +154,17 @@ void iteratorExample() {
     ),
   );
 
-  print('\n[In-order tree traversal]');
+  // Direct InOrderIterator — low-level moveNext()/current protocol
+  print('\n[InOrderIterator — manual protocol]');
+  final iter = InOrderIterator(tree.root);
+  final visited = <int>[];
+  while (iter.moveNext()) {
+    visited.add(iter.current);
+  }
+  print('  Visited: $visited'); // [1, 2, 3, 4, 5, 6, 7]
+
+  // BinaryTree wraps the same iterator behind Iterable<T>
+  print('\n[In-order tree traversal via BinaryTree (Iterable)]');
   print('  Values: ${tree.toList()}'); // [1, 2, 3, 4, 5, 6, 7]
 
   // Built-in Iterable methods work automatically
