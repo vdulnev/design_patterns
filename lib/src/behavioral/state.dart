@@ -12,13 +12,12 @@ import 'package:riverpod/riverpod.dart';
 // - Examples: Vending machine, traffic light, order lifecycle, media player,
 //   network connection (connecting/open/closed)
 //
-// Key points — sealed-class + method-per-subtype variant (Dart 3+):
-// - `sealed` enforces exhaustiveness: any switch on VendingState must cover
-//   every subtype or the compiler rejects it
-// - Methods are abstract in the sealed base and implemented per subtype
-// - The context (VendingMachine, Cubit, Notifier) is passed as a method
-//   parameter — not stored in the state — so state objects remain data-only,
-//   can be const, and are shareable across all three implementations
+// Key points — split model/interface variant (Dart 3+):
+// - VendingStateModel: sealed, pure data — used as the state type by BLoC
+//   and Riverpod; switch exhaustiveness is enforced by the sealed keyword
+// - VendingState: abstract interface, behaviour only — used by VendingMachine
+// - Concrete states (IdleState, HasMoneyState, DispensingState) extend their
+//   model class AND implement VendingState, satisfying both roles with one class
 
 // ─────────────────────────────────────────────
 // Product helper
@@ -32,24 +31,54 @@ class VendingProduct {
 }
 
 // ─────────────────────────────────────────────
-// Sealed state hierarchy
+// VendingStateModel — sealed pure-data hierarchy
 //
-// Pure data — no stored context reference.
-// Methods accept VendingMachine so the state can trigger transitions;
-// this makes the same subtypes usable with VendingCubit and VendingNotifier.
+// Direct subtypes are IdleModel, HasMoneyModel, DispensingModel.
+// Used as the State type parameter for Cubit<VendingStateModel> and
+// Notifier<VendingStateModel> — the sealed keyword makes every switch
+// on VendingStateModel exhaustively checked by the compiler.
 // ─────────────────────────────────────────────
 
-sealed class VendingState {
-  const VendingState();
+sealed class VendingStateModel {
+  const VendingStateModel();
+}
 
-  // Methods receive the context; state owns the behaviour (classic GoF)
-  // but stays data-only (no stored back-reference).
+class IdleModel extends VendingStateModel {
+  const IdleModel();
+}
+
+class HasMoneyModel extends VendingStateModel {
+  final double balance;
+  const HasMoneyModel(this.balance);
+}
+
+class DispensingModel extends VendingStateModel {
+  final String code;
+  final double balance;
+  const DispensingModel({required this.code, required this.balance});
+}
+
+// ─────────────────────────────────────────────
+// VendingState — behaviour interface
+//
+// Declares the three operations; VendingMachine holds a VendingState and
+// delegates to it, passing itself so the state can trigger transitions.
+// ─────────────────────────────────────────────
+
+abstract interface class VendingState {
   void insertCoin(VendingMachine machine, double amount);
   void selectProduct(VendingMachine machine, String code);
   void cancel(VendingMachine machine);
 }
 
-class IdleState extends VendingState {
+// ─────────────────────────────────────────────
+// Concrete states
+//
+// Each class extends its model (carries data, satisfies VendingStateModel)
+// AND implements VendingState (carries behaviour, usable by VendingMachine).
+// ─────────────────────────────────────────────
+
+class IdleState extends IdleModel implements VendingState {
   const IdleState();
 
   @override
@@ -67,9 +96,8 @@ class IdleState extends VendingState {
   void cancel(VendingMachine machine) => print('  Nothing to cancel.');
 }
 
-class HasMoneyState extends VendingState {
-  final double balance;
-  const HasMoneyState(this.balance);
+class HasMoneyState extends HasMoneyModel implements VendingState {
+  const HasMoneyState(super.balance);
 
   @override
   void insertCoin(VendingMachine machine, double amount) {
@@ -109,10 +137,8 @@ class HasMoneyState extends VendingState {
   }
 }
 
-class DispensingState extends VendingState {
-  final String code;
-  final double balance;
-  const DispensingState({required this.code, required this.balance});
+class DispensingState extends DispensingModel implements VendingState {
+  const DispensingState({required super.code, required super.balance});
 
   @override
   void insertCoin(VendingMachine machine, double amount) =>
@@ -130,7 +156,9 @@ class DispensingState extends VendingState {
 // ─────────────────────────────────────────────
 // Custom context (VendingMachine)
 //
-// Holds state and inventory; delegates to state methods, passing itself.
+// _state is typed as VendingState (interface); concrete instances are
+// always one of the three concrete states, which are also VendingStateModel
+// subtypes — but VendingMachine never needs to know that.
 // ─────────────────────────────────────────────
 
 class VendingMachine {
@@ -161,7 +189,6 @@ class VendingMachine {
     _transition(const IdleState());
   }
 
-  // Public API — each call passes `this` so the state can trigger transitions
   void insertCoin(double amount)  => _state.insertCoin(this, amount);
   void selectProduct(String code) => _state.selectProduct(this, code);
   void cancel()                   => _state.cancel(this);
@@ -170,25 +197,21 @@ class VendingMachine {
 // ─────────────────────────────────────────────
 // BLoC / Cubit (package:bloc)
 //
-// Cubit<State> is the simplest BLoC abstraction:
-//   emit(newState)  → updates state + notifies stream listeners
-//   state           → synchronous read of the current state
-//   stream          → Stream<State> for reactive subscribers
-//   close()         → disposes the underlying StreamController
+// Uses VendingStateModel as the state type — pure data, sealed.
+// Cubit owns the transition logic via exhaustive switch on `state`.
+// Because IdleState/HasMoneyState/DispensingState extend the sealed model
+// subtypes, emitting them satisfies Cubit<VendingStateModel>.
+// Pattern matching uses the model subtypes (IdleModel, HasMoneyModel, …)
+// which also match their subclasses.
 //
-// The sealed VendingState hierarchy is reused as-is — state subtypes
-// are pure data, so Cubit owns the transition logic via switch on `state`.
-//
-// A full Bloc<Event, State> adds an explicit sealed event type and
-// on<Event>(handler) registration, preferred when events carry extra data
-// or need async side-effects:
+// A full Bloc<Event, State> adds an explicit sealed event type:
 //
 //   sealed class VendingEvent {}
 //   class InsertCoin    extends VendingEvent { final double amount; ... }
 //   class SelectProduct extends VendingEvent { final String code;  ... }
 //   class Cancel        extends VendingEvent {}
 //
-//   class VendingBloc extends Bloc<VendingEvent, VendingState> {
+//   class VendingBloc extends Bloc<VendingEvent, VendingStateModel> {
 //     VendingBloc() : super(const IdleState()) {
 //       on<InsertCoin>(_onInsertCoin);
 //       on<SelectProduct>(_onSelectProduct);
@@ -197,7 +220,7 @@ class VendingMachine {
 //   }
 // ─────────────────────────────────────────────
 
-class VendingCubit extends Cubit<VendingState> {
+class VendingCubit extends Cubit<VendingStateModel> {
   final Map<String, VendingProduct> _inventory = {
     'A1': VendingProduct('Cola', 1.50, 5),
     'B2': VendingProduct('Chips', 2.00, 3),
@@ -207,27 +230,27 @@ class VendingCubit extends Cubit<VendingState> {
 
   void insertCoin(double amount) {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Inserted \$${amount.toStringAsFixed(2)}.'
             ' Balance: \$${amount.toStringAsFixed(2)}');
         emit(HasMoneyState(amount));
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         final newBalance = balance + amount;
         print('  Added \$${amount.toStringAsFixed(2)}.'
             ' Balance: \$${newBalance.toStringAsFixed(2)}');
         emit(HasMoneyState(newBalance));
-      case DispensingState():
+      case DispensingModel():
         print('  Please wait — dispensing in progress.');
     }
   }
 
   void selectProduct(String code) {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Please insert coins first.');
-      case DispensingState():
+      case DispensingModel():
         print('  Please wait — dispensing in progress.');
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         final product = _inventory[code];
         if (product == null) { print('  Unknown product: $code'); return; }
         if (product.stock == 0) { print('  ${product.name} is sold out.'); return; }
@@ -246,12 +269,12 @@ class VendingCubit extends Cubit<VendingState> {
 
   void cancel() {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Nothing to cancel.');
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
         emit(const IdleState());
-      case DispensingState():
+      case DispensingModel():
         print('  Cannot cancel — already dispensing.');
     }
   }
@@ -267,51 +290,44 @@ class VendingCubit extends Cubit<VendingState> {
 }
 
 // ─────────────────────────────────────────────
-// Riverpod — Notifier<State> (package:riverpod)
+// Riverpod — Notifier<VendingStateModel> (package:riverpod)
 //
-// Notifier<State> maps the State pattern onto Riverpod's provider graph:
-//   build()                       → returns the initial state
-//   state = newState              → updates state + notifies subscribers
-//   NotifierProvider<N, S>(N.new) → declares the provider
-//   ProviderContainer             → pure-Dart owner of the provider graph
-//   container.read(p.notifier)    → gets the Notifier to call methods on
-//   container.read(p)             → reads current state synchronously
-//   container.listen(p, fn)       → reactive subscription to state changes
-//   container.dispose()           → closes all providers
+// Same split: VendingStateModel as the state type, exhaustive switch on
+// the model subtypes, state= setter for transitions.
 // ─────────────────────────────────────────────
 
-class VendingNotifier extends Notifier<VendingState> {
+class VendingNotifier extends Notifier<VendingStateModel> {
   final Map<String, VendingProduct> _inventory = {
     'A1': VendingProduct('Cola', 1.50, 5),
     'B2': VendingProduct('Chips', 2.00, 3),
   };
 
   @override
-  VendingState build() => const IdleState();
+  VendingStateModel build() => const IdleState();
 
   void insertCoin(double amount) {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Inserted \$${amount.toStringAsFixed(2)}.'
             ' Balance: \$${amount.toStringAsFixed(2)}');
         state = HasMoneyState(amount);
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         final newBalance = balance + amount;
         print('  Added \$${amount.toStringAsFixed(2)}.'
             ' Balance: \$${newBalance.toStringAsFixed(2)}');
         state = HasMoneyState(newBalance);
-      case DispensingState():
+      case DispensingModel():
         print('  Please wait — dispensing in progress.');
     }
   }
 
   void selectProduct(String code) {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Please insert coins first.');
-      case DispensingState():
+      case DispensingModel():
         print('  Please wait — dispensing in progress.');
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         final product = _inventory[code];
         if (product == null) { print('  Unknown product: $code'); return; }
         if (product.stock == 0) { print('  ${product.name} is sold out.'); return; }
@@ -330,12 +346,12 @@ class VendingNotifier extends Notifier<VendingState> {
 
   void cancel() {
     switch (state) {
-      case IdleState():
+      case IdleModel():
         print('  Nothing to cancel.');
-      case HasMoneyState(:final balance):
+      case HasMoneyModel(:final balance):
         print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
         state = const IdleState();
-      case DispensingState():
+      case DispensingModel():
         print('  Cannot cancel — already dispensing.');
     }
   }
@@ -351,7 +367,7 @@ class VendingNotifier extends Notifier<VendingState> {
 }
 
 final vendingProvider =
-    NotifierProvider<VendingNotifier, VendingState>(VendingNotifier.new);
+    NotifierProvider<VendingNotifier, VendingStateModel>(VendingNotifier.new);
 
 // ─────────────────────────────────────────────
 // Example runners
