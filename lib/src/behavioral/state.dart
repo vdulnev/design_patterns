@@ -1,4 +1,5 @@
 import 'package:bloc/bloc.dart';
+import 'package:equatable/equatable.dart';
 import 'package:riverpod/riverpod.dart';
 
 // # State Pattern
@@ -41,23 +42,32 @@ class VendingProduct {
 // on VendingStateModel exhaustively checked by the compiler.
 // ─────────────────────────────────────────────
 
-sealed class VendingStateModel {
+sealed class VendingStateModel extends Equatable {
   const VendingStateModel();
 }
 
 class IdleModel extends VendingStateModel {
   const IdleModel();
+
+  @override
+  List<Object?> get props => const [];
 }
 
 class HasMoneyModel extends VendingStateModel {
   final double balance;
   const HasMoneyModel(this.balance);
+
+  @override
+  List<Object?> get props => [balance];
 }
 
 class DispensingModel extends VendingStateModel {
   final String code;
   final double balance;
   const DispensingModel({required this.code, required this.balance});
+
+  @override
+  List<Object?> get props => [code, balance];
 }
 
 // ─────────────────────────────────────────────
@@ -84,8 +94,11 @@ abstract interface class VendingState {
 // satisfies the interface; no class inherits from the model hierarchy.
 // ─────────────────────────────────────────────
 
-class IdleState implements VendingState {
+class IdleState extends Equatable implements VendingState {
   const IdleState();
+
+  @override
+  List<Object?> get props => const [];
 
   @override
   IdleModel get model => const IdleModel();
@@ -112,11 +125,14 @@ class IdleState implements VendingState {
   }
 }
 
-class HasMoneyState implements VendingState {
+class HasMoneyState extends Equatable implements VendingState {
   @override
   final HasMoneyModel model;
 
   HasMoneyState(double balance) : model = HasMoneyModel(balance);
+
+  @override
+  List<Object?> get props => [model];
 
   @override
   VendingState insertCoin(double amount) {
@@ -161,12 +177,15 @@ class HasMoneyState implements VendingState {
   }
 }
 
-class DispensingState implements VendingState {
+class DispensingState extends Equatable implements VendingState {
   @override
   final DispensingModel model;
 
   DispensingState({required String code, required double balance})
       : model = DispensingModel(code: code, balance: balance);
+
+  @override
+  List<Object?> get props => [model];
 
   @override
   VendingState insertCoin(double amount) {
@@ -205,7 +224,7 @@ class VendingMachine {
   }
 
   void _transition(VendingState next) {
-    if (identical(_state, next)) return;
+    if (_state == next) return;
     print('  [State] ${_state.runtimeType} → ${next.runtimeType}');
     _state = next;
   }
@@ -257,26 +276,22 @@ class VendingMachine {
 //   }
 // ─────────────────────────────────────────────
 
-class VendingCubit extends Cubit<VendingStateModel> {
+class VendingCubit extends Cubit<VendingState> {
   final Map<String, VendingProduct> _inventory = {
     'A1': VendingProduct('Cola', 1.50, 5),
     'B2': VendingProduct('Chips', 2.00, 3),
   };
 
-  VendingState _currentState = const IdleState();
-
-  VendingCubit() : super(const IdleModel());
+  VendingCubit() : super(const IdleState());
 
   void _apply(VendingState next) {
-    if (identical(_currentState, next)) return;
-    _currentState = next;
-    emit(next.model);
+    emit(next);
     if (next is DispensingState) _dispense(next);
   }
 
-  void insertCoin(double amount)  => _apply(_currentState.insertCoin(amount));
-  void selectProduct(String code) => _apply(_currentState.selectProduct(code, _inventory));
-  void cancel()                   => _apply(_currentState.cancel());
+  void insertCoin(double amount)  => _apply(state.insertCoin(amount));
+  void selectProduct(String code) => _apply(state.selectProduct(code, _inventory));
+  void cancel()                   => _apply(state.cancel());
 
   void _dispense(DispensingState dispensing) {
     final product = _inventory[dispensing.model.code]!;
@@ -285,8 +300,7 @@ class VendingCubit extends Cubit<VendingStateModel> {
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
     if (product.stock == 0) print('  ${product.name} now out of stock.');
-    _currentState = const IdleState();
-    emit(const IdleModel());
+    emit(const IdleState());
   }
 }
 
@@ -297,27 +311,23 @@ class VendingCubit extends Cubit<VendingStateModel> {
 // state= sets the VendingStateModel for reactive subscribers.
 // ─────────────────────────────────────────────
 
-class VendingNotifier extends Notifier<VendingStateModel> {
+class VendingNotifier extends Notifier<VendingState> {
   final Map<String, VendingProduct> _inventory = {
     'A1': VendingProduct('Cola', 1.50, 5),
     'B2': VendingProduct('Chips', 2.00, 3),
   };
 
-  VendingState _currentState = const IdleState();
-
   @override
-  VendingStateModel build() => const IdleModel();
+  VendingState build() => const IdleState();
 
   void _apply(VendingState next) {
-    if (identical(_currentState, next)) return;
-    _currentState = next;
-    state = next.model;
+    state = next;
     if (next is DispensingState) _dispense(next);
   }
 
-  void insertCoin(double amount)  => _apply(_currentState.insertCoin(amount));
-  void selectProduct(String code) => _apply(_currentState.selectProduct(code, _inventory));
-  void cancel()                   => _apply(_currentState.cancel());
+  void insertCoin(double amount)  => _apply(state.insertCoin(amount));
+  void selectProduct(String code) => _apply(state.selectProduct(code, _inventory));
+  void cancel()                   => _apply(state.cancel());
 
   void _dispense(DispensingState dispensing) {
     final product = _inventory[dispensing.model.code]!;
@@ -326,12 +336,11 @@ class VendingNotifier extends Notifier<VendingStateModel> {
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
     if (product.stock == 0) print('  ${product.name} now out of stock.');
-    _currentState = const IdleState();
-    state = const IdleModel();
+    state = const IdleState();
   }
 }
 
-final vendingProvider = NotifierProvider<VendingNotifier, VendingStateModel>(
+final vendingProvider = NotifierProvider<VendingNotifier, VendingState>(
   VendingNotifier.new,
 );
 
