@@ -215,12 +215,10 @@ class VendingMachine {
 // ─────────────────────────────────────────────
 // BLoC / Cubit (package:bloc)
 //
-// Uses VendingStateModel as the state type — pure data, sealed.
-// Cubit owns the transition logic via exhaustive switch on `state`.
-// Because IdleState/HasMoneyState/DispensingState extend the sealed model
-// subtypes, emitting them satisfies Cubit<VendingStateModel>.
-// Pattern matching uses the model subtypes (IdleModel, HasMoneyModel, …)
-// which also match their subclasses.
+// Delegates to VendingState — the same reactive interface used by
+// VendingMachine. _state casts Cubit.state to VendingState (safe: all
+// concrete states implement both). _apply emits the returned next state
+// and triggers the dispense side-effect when it is a DispensingModel.
 //
 // A full Bloc<Event, State> adds an explicit sealed event type:
 //
@@ -246,59 +244,21 @@ class VendingCubit extends Cubit<VendingStateModel> {
 
   VendingCubit() : super(const IdleState());
 
-  void insertCoin(double amount) {
-    switch (state) {
-      case IdleModel():
-        print('  Inserted \$${amount.toStringAsFixed(2)}.'
-            ' Balance: \$${amount.toStringAsFixed(2)}');
-        emit(HasMoneyState(amount));
-      case HasMoneyModel(:final balance):
-        final newBalance = balance + amount;
-        print('  Added \$${amount.toStringAsFixed(2)}.'
-            ' Balance: \$${newBalance.toStringAsFixed(2)}');
-        emit(HasMoneyState(newBalance));
-      case DispensingModel():
-        print('  Please wait — dispensing in progress.');
-    }
+  VendingState get _state => state as VendingState;
+
+  void _apply(VendingStateModel next) {
+    if (identical(state, next)) return;
+    emit(next);
+    if (next is DispensingModel) _dispense(next);
   }
 
-  void selectProduct(String code) {
-    switch (state) {
-      case IdleModel():
-        print('  Please insert coins first.');
-      case DispensingModel():
-        print('  Please wait — dispensing in progress.');
-      case HasMoneyModel(:final balance):
-        final product = _inventory[code];
-        if (product == null) { print('  Unknown product: $code'); return; }
-        if (product.stock == 0) { print('  ${product.name} is sold out.'); return; }
-        if (balance < product.price) {
-          print('  Insufficient balance.'
-              ' Need \$${product.price.toStringAsFixed(2)},'
-              ' have \$${balance.toStringAsFixed(2)}');
-          return;
-        }
-        print('  Selected: ${product.name}'
-            ' (\$${product.price.toStringAsFixed(2)})');
-        emit(DispensingState(code: code, balance: balance));
-        _dispense(product, balance);
-    }
-  }
+  void insertCoin(double amount)  => _apply(_state.insertCoin(amount));
+  void selectProduct(String code) => _apply(_state.selectProduct(code, _inventory));
+  void cancel()                   => _apply(_state.cancel());
 
-  void cancel() {
-    switch (state) {
-      case IdleModel():
-        print('  Nothing to cancel.');
-      case HasMoneyModel(:final balance):
-        print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
-        emit(const IdleState());
-      case DispensingModel():
-        print('  Cannot cancel — already dispensing.');
-    }
-  }
-
-  void _dispense(VendingProduct product, double balance) {
-    final change = balance - product.price;
+  void _dispense(DispensingModel dispensing) {
+    final product = _inventory[dispensing.code]!;
+    final change  = dispensing.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
@@ -310,8 +270,8 @@ class VendingCubit extends Cubit<VendingStateModel> {
 // ─────────────────────────────────────────────
 // Riverpod — Notifier<VendingStateModel> (package:riverpod)
 //
-// Same split: VendingStateModel as the state type, exhaustive switch on
-// the model subtypes, state= setter for transitions.
+// Delegates to VendingState — same approach as VendingCubit. _apply sets
+// the Notifier state= and triggers _dispense when it is a DispensingModel.
 // ─────────────────────────────────────────────
 
 class VendingNotifier extends Notifier<VendingStateModel> {
@@ -323,59 +283,21 @@ class VendingNotifier extends Notifier<VendingStateModel> {
   @override
   VendingStateModel build() => const IdleState();
 
-  void insertCoin(double amount) {
-    switch (state) {
-      case IdleModel():
-        print('  Inserted \$${amount.toStringAsFixed(2)}.'
-            ' Balance: \$${amount.toStringAsFixed(2)}');
-        state = HasMoneyState(amount);
-      case HasMoneyModel(:final balance):
-        final newBalance = balance + amount;
-        print('  Added \$${amount.toStringAsFixed(2)}.'
-            ' Balance: \$${newBalance.toStringAsFixed(2)}');
-        state = HasMoneyState(newBalance);
-      case DispensingModel():
-        print('  Please wait — dispensing in progress.');
-    }
+  VendingState get _state => state as VendingState;
+
+  void _apply(VendingStateModel next) {
+    if (identical(state, next)) return;
+    state = next;
+    if (next is DispensingModel) _dispense(next);
   }
 
-  void selectProduct(String code) {
-    switch (state) {
-      case IdleModel():
-        print('  Please insert coins first.');
-      case DispensingModel():
-        print('  Please wait — dispensing in progress.');
-      case HasMoneyModel(:final balance):
-        final product = _inventory[code];
-        if (product == null) { print('  Unknown product: $code'); return; }
-        if (product.stock == 0) { print('  ${product.name} is sold out.'); return; }
-        if (balance < product.price) {
-          print('  Insufficient balance.'
-              ' Need \$${product.price.toStringAsFixed(2)},'
-              ' have \$${balance.toStringAsFixed(2)}');
-          return;
-        }
-        print('  Selected: ${product.name}'
-            ' (\$${product.price.toStringAsFixed(2)})');
-        state = DispensingState(code: code, balance: balance);
-        _dispense(product, balance);
-    }
-  }
+  void insertCoin(double amount)  => _apply(_state.insertCoin(amount));
+  void selectProduct(String code) => _apply(_state.selectProduct(code, _inventory));
+  void cancel()                   => _apply(_state.cancel());
 
-  void cancel() {
-    switch (state) {
-      case IdleModel():
-        print('  Nothing to cancel.');
-      case HasMoneyModel(:final balance):
-        print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
-        state = const IdleState();
-      case DispensingModel():
-        print('  Cannot cancel — already dispensing.');
-    }
-  }
-
-  void _dispense(VendingProduct product, double balance) {
-    final change = balance - product.price;
+  void _dispense(DispensingModel dispensing) {
+    final product = _inventory[dispensing.code]!;
+    final change  = dispensing.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
