@@ -68,7 +68,10 @@ class DispensingModel extends VendingStateModel {
 
 abstract interface class VendingState {
   VendingStateModel insertCoin(double amount);
-  VendingStateModel selectProduct(String code, Map<String, VendingProduct> inventory);
+  VendingStateModel selectProduct(
+    String code,
+    Map<String, VendingProduct> inventory,
+  );
   VendingStateModel cancel();
 }
 
@@ -84,13 +87,18 @@ class IdleState extends IdleModel implements VendingState {
 
   @override
   VendingStateModel insertCoin(double amount) {
-    print('  Inserted \$${amount.toStringAsFixed(2)}.'
-        ' Balance: \$${amount.toStringAsFixed(2)}');
+    print(
+      '  Inserted \$${amount.toStringAsFixed(2)}.'
+      ' Balance: \$${amount.toStringAsFixed(2)}',
+    );
     return HasMoneyState(amount);
   }
 
   @override
-  VendingStateModel selectProduct(String code, Map<String, VendingProduct> inventory) {
+  VendingStateModel selectProduct(
+    String code,
+    Map<String, VendingProduct> inventory,
+  ) {
     print('  Please insert coins first.');
     return this;
   }
@@ -108,13 +116,18 @@ class HasMoneyState extends HasMoneyModel implements VendingState {
   @override
   VendingStateModel insertCoin(double amount) {
     final newBalance = balance + amount;
-    print('  Added \$${amount.toStringAsFixed(2)}.'
-        ' Balance: \$${newBalance.toStringAsFixed(2)}');
+    print(
+      '  Added \$${amount.toStringAsFixed(2)}.'
+      ' Balance: \$${newBalance.toStringAsFixed(2)}',
+    );
     return HasMoneyState(newBalance);
   }
 
   @override
-  VendingStateModel selectProduct(String code, Map<String, VendingProduct> inventory) {
+  VendingStateModel selectProduct(
+    String code,
+    Map<String, VendingProduct> inventory,
+  ) {
     final product = inventory[code];
     if (product == null) {
       print('  Unknown product code: $code');
@@ -125,13 +138,17 @@ class HasMoneyState extends HasMoneyModel implements VendingState {
       return this;
     }
     if (balance < product.price) {
-      print('  Insufficient balance.'
-          ' Need \$${product.price.toStringAsFixed(2)},'
-          ' have \$${balance.toStringAsFixed(2)}');
+      print(
+        '  Insufficient balance.'
+        ' Need \$${product.price.toStringAsFixed(2)},'
+        ' have \$${balance.toStringAsFixed(2)}',
+      );
       return this;
     }
-    print('  Selected: ${product.name}'
-        ' (\$${product.price.toStringAsFixed(2)})');
+    print(
+      '  Selected: ${product.name}'
+      ' (\$${product.price.toStringAsFixed(2)})',
+    );
     return DispensingState(code: code, balance: balance);
   }
 
@@ -152,7 +169,10 @@ class DispensingState extends DispensingModel implements VendingState {
   }
 
   @override
-  VendingStateModel selectProduct(String code, Map<String, VendingProduct> inventory) {
+  VendingStateModel selectProduct(
+    String code,
+    Map<String, VendingProduct> inventory,
+  ) {
     print('  Please wait — dispensing in progress.');
     return this;
   }
@@ -184,13 +204,15 @@ class VendingMachine {
   void _transition(VendingStateModel next) {
     if (identical(_state, next)) return;
     print('  [State] ${_state.runtimeType} → ${next.runtimeType}');
-    _state = next as VendingState; // safe: all concrete states implement VendingState
+    _state =
+        next
+            as VendingState; // safe: all concrete states implement VendingState
   }
 
-  void _dispense() {
-    final DispensingState(:code, :balance) = _state as DispensingState;
+  void _dispense(DispensingModel dispensingModel) {
+    final DispensingModel(:code, :balance) = dispensingModel;
     final product = _inventory[code]!;
-    final change  = balance - product.price;
+    final change = balance - product.price;
 
     print('  Dispensing ${product.name}...');
     product.stock--;
@@ -206,7 +228,7 @@ class VendingMachine {
   void selectProduct(String code) {
     final next = _state.selectProduct(code, _inventory);
     _transition(next);
-    if (next is DispensingModel) _dispense();
+    if (next is DispensingModel) _dispense(next);
   }
 
   void cancel() => _transition(_state.cancel());
@@ -252,13 +274,14 @@ class VendingCubit extends Cubit<VendingStateModel> {
     if (next is DispensingModel) _dispense(next);
   }
 
-  void insertCoin(double amount)  => _apply(_state.insertCoin(amount));
-  void selectProduct(String code) => _apply(_state.selectProduct(code, _inventory));
-  void cancel()                   => _apply(_state.cancel());
+  void insertCoin(double amount) => _apply(_state.insertCoin(amount));
+  void selectProduct(String code) =>
+      _apply(_state.selectProduct(code, _inventory));
+  void cancel() => _apply(_state.cancel());
 
   void _dispense(DispensingModel dispensing) {
     final product = _inventory[dispensing.code]!;
-    final change  = dispensing.balance - product.price;
+    final change = dispensing.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
@@ -291,13 +314,14 @@ class VendingNotifier extends Notifier<VendingStateModel> {
     if (next is DispensingModel) _dispense(next);
   }
 
-  void insertCoin(double amount)  => _apply(_state.insertCoin(amount));
-  void selectProduct(String code) => _apply(_state.selectProduct(code, _inventory));
-  void cancel()                   => _apply(_state.cancel());
+  void insertCoin(double amount) => _apply(_state.insertCoin(amount));
+  void selectProduct(String code) =>
+      _apply(_state.selectProduct(code, _inventory));
+  void cancel() => _apply(_state.cancel());
 
   void _dispense(DispensingModel dispensing) {
     final product = _inventory[dispensing.code]!;
-    final change  = dispensing.balance - product.price;
+    final change = dispensing.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
@@ -306,8 +330,9 @@ class VendingNotifier extends Notifier<VendingStateModel> {
   }
 }
 
-final vendingProvider =
-    NotifierProvider<VendingNotifier, VendingStateModel>(VendingNotifier.new);
+final vendingProvider = NotifierProvider<VendingNotifier, VendingStateModel>(
+  VendingNotifier.new,
+);
 
 // ─────────────────────────────────────────────
 // Example runners
