@@ -14,10 +14,12 @@ import 'package:riverpod/riverpod.dart';
 //
 // Key points — reactive split model/interface variant (Dart 3+):
 // - VendingStateModel: sealed, pure data — state type for BLoC and Riverpod
-// - VendingState: abstract interface — each method returns the next
-//   VendingStateModel; no VendingMachine reference (pure input→next-state fn)
-// - Concrete states extend their model class AND implement VendingState
-// - VendingMachine applies the returned next state and triggers side-effects
+// - VendingState: abstract interface — methods return the next VendingState;
+//   a model getter exposes the VendingStateModel for BLoC/Riverpod emission
+// - Concrete states implement VendingState only; each holds its
+//   VendingStateModel subtype by composition (no model inheritance)
+// - VendingMachine works purely with VendingState; BLoC/Riverpod emit
+//   next.model to keep their VendingStateModel state type in sync
 
 // ─────────────────────────────────────────────
 // Product helper
@@ -61,32 +63,35 @@ class DispensingModel extends VendingStateModel {
 // ─────────────────────────────────────────────
 // VendingState — behaviour interface
 //
-// Each method returns the next VendingStateModel. Returning `this` means
-// no transition. selectProduct receives the inventory map so the state
-// can validate stock and price independently of VendingMachine.
+// Each method returns the next VendingState. Returning `this` means no
+// transition. The model getter exposes the VendingStateModel so BLoC and
+// Riverpod can emit/set it as their state type. selectProduct receives
+// the inventory map for stock and price validation.
 // ─────────────────────────────────────────────
 
 abstract interface class VendingState {
-  VendingStateModel insertCoin(double amount);
-  VendingStateModel selectProduct(
-    String code,
-    Map<String, VendingProduct> inventory,
-  );
-  VendingStateModel cancel();
+  VendingStateModel get model;
+  VendingState insertCoin(double amount);
+  VendingState selectProduct(String code, Map<String, VendingProduct> inventory);
+  VendingState cancel();
 }
 
 // ─────────────────────────────────────────────
 // Concrete states
 //
-// Each class extends its model (carries data, satisfies VendingStateModel)
-// AND implements VendingState (carries behaviour, usable by VendingMachine).
+// Each class implements VendingState only; data is held by composition —
+// a final field of the matching VendingStateModel subtype. The model getter
+// satisfies the interface; no class inherits from the model hierarchy.
 // ─────────────────────────────────────────────
 
-class IdleState extends IdleModel implements VendingState {
+class IdleState implements VendingState {
   const IdleState();
 
   @override
-  VendingStateModel insertCoin(double amount) {
+  IdleModel get model => const IdleModel();
+
+  @override
+  VendingState insertCoin(double amount) {
     print(
       '  Inserted \$${amount.toStringAsFixed(2)}.'
       ' Balance: \$${amount.toStringAsFixed(2)}',
@@ -95,27 +100,27 @@ class IdleState extends IdleModel implements VendingState {
   }
 
   @override
-  VendingStateModel selectProduct(
-    String code,
-    Map<String, VendingProduct> inventory,
-  ) {
+  VendingState selectProduct(String code, Map<String, VendingProduct> inventory) {
     print('  Please insert coins first.');
     return this;
   }
 
   @override
-  VendingStateModel cancel() {
+  VendingState cancel() {
     print('  Nothing to cancel.');
     return this;
   }
 }
 
-class HasMoneyState extends HasMoneyModel implements VendingState {
-  const HasMoneyState(super.balance);
+class HasMoneyState implements VendingState {
+  @override
+  final HasMoneyModel model;
+
+  HasMoneyState(double balance) : model = HasMoneyModel(balance);
 
   @override
-  VendingStateModel insertCoin(double amount) {
-    final newBalance = balance + amount;
+  VendingState insertCoin(double amount) {
+    final newBalance = model.balance + amount;
     print(
       '  Added \$${amount.toStringAsFixed(2)}.'
       ' Balance: \$${newBalance.toStringAsFixed(2)}',
@@ -124,10 +129,7 @@ class HasMoneyState extends HasMoneyModel implements VendingState {
   }
 
   @override
-  VendingStateModel selectProduct(
-    String code,
-    Map<String, VendingProduct> inventory,
-  ) {
+  VendingState selectProduct(String code, Map<String, VendingProduct> inventory) {
     final product = inventory[code];
     if (product == null) {
       print('  Unknown product code: $code');
@@ -137,11 +139,11 @@ class HasMoneyState extends HasMoneyModel implements VendingState {
       print('  ${product.name} is sold out.');
       return this;
     }
-    if (balance < product.price) {
+    if (model.balance < product.price) {
       print(
         '  Insufficient balance.'
         ' Need \$${product.price.toStringAsFixed(2)},'
-        ' have \$${balance.toStringAsFixed(2)}',
+        ' have \$${model.balance.toStringAsFixed(2)}',
       );
       return this;
     }
@@ -149,36 +151,37 @@ class HasMoneyState extends HasMoneyModel implements VendingState {
       '  Selected: ${product.name}'
       ' (\$${product.price.toStringAsFixed(2)})',
     );
-    return DispensingState(code: code, balance: balance);
+    return DispensingState(code: code, balance: model.balance);
   }
 
   @override
-  VendingStateModel cancel() {
-    print('  Cancelled. Refunding \$${balance.toStringAsFixed(2)}');
+  VendingState cancel() {
+    print('  Cancelled. Refunding \$${model.balance.toStringAsFixed(2)}');
     return const IdleState();
   }
 }
 
-class DispensingState extends DispensingModel implements VendingState {
-  const DispensingState({required super.code, required super.balance});
+class DispensingState implements VendingState {
+  @override
+  final DispensingModel model;
+
+  DispensingState({required String code, required double balance})
+      : model = DispensingModel(code: code, balance: balance);
 
   @override
-  VendingStateModel insertCoin(double amount) {
+  VendingState insertCoin(double amount) {
     print('  Please wait — dispensing in progress.');
     return this;
   }
 
   @override
-  VendingStateModel selectProduct(
-    String code,
-    Map<String, VendingProduct> inventory,
-  ) {
+  VendingState selectProduct(String code, Map<String, VendingProduct> inventory) {
     print('  Please wait — dispensing in progress.');
     return this;
   }
 
   @override
-  VendingStateModel cancel() {
+  VendingState cancel() {
     print('  Cannot cancel — already dispensing.');
     return this;
   }
@@ -187,9 +190,9 @@ class DispensingState extends DispensingModel implements VendingState {
 // ─────────────────────────────────────────────
 // Custom context (VendingMachine)
 //
-// Calls the reactive VendingState methods and applies the returned next
-// state. selectProduct also checks whether the next state is a
-// DispensingModel and, if so, runs the dispense side-effect.
+// Works entirely with VendingState — no casts needed. selectProduct checks
+// whether the returned next state is a DispensingState and, if so, runs
+// the dispense side-effect.
 // ─────────────────────────────────────────────
 
 class VendingMachine {
@@ -201,18 +204,15 @@ class VendingMachine {
     _inventory['B2'] = VendingProduct('Chips', 2.00, 3);
   }
 
-  void _transition(VendingStateModel next) {
+  void _transition(VendingState next) {
     if (identical(_state, next)) return;
     print('  [State] ${_state.runtimeType} → ${next.runtimeType}');
-    _state =
-        next
-            as VendingState; // safe: all concrete states implement VendingState
+    _state = next;
   }
 
-  void _dispense(DispensingModel dispensingModel) {
-    final DispensingModel(:code, :balance) = dispensingModel;
-    final product = _inventory[code]!;
-    final change = balance - product.price;
+  void _dispense(DispensingState dispensing) {
+    final product = _inventory[dispensing.model.code]!;
+    final change = dispensing.model.balance - product.price;
 
     print('  Dispensing ${product.name}...');
     product.stock--;
@@ -228,7 +228,7 @@ class VendingMachine {
   void selectProduct(String code) {
     final next = _state.selectProduct(code, _inventory);
     _transition(next);
-    if (next is DispensingModel) _dispense(next);
+    if (next is DispensingState) _dispense(next);
   }
 
   void cancel() => _transition(_state.cancel());
@@ -237,10 +237,9 @@ class VendingMachine {
 // ─────────────────────────────────────────────
 // BLoC / Cubit (package:bloc)
 //
-// Delegates to VendingState — the same reactive interface used by
-// VendingMachine. _state casts Cubit.state to VendingState (safe: all
-// concrete states implement both). _apply emits the returned next state
-// and triggers the dispense side-effect when it is a DispensingModel.
+// _currentState tracks the VendingState (behaviour); emit(next.model)
+// keeps Cubit<VendingStateModel> in sync for reactive subscribers.
+// _apply triggers the dispense side-effect when next is DispensingState.
 //
 // A full Bloc<Event, State> adds an explicit sealed event type:
 //
@@ -250,7 +249,7 @@ class VendingMachine {
 //   class Cancel        extends VendingEvent {}
 //
 //   class VendingBloc extends Bloc<VendingEvent, VendingStateModel> {
-//     VendingBloc() : super(const IdleState()) {
+//     VendingBloc() : super(const IdleModel()) {
 //       on<InsertCoin>(_onInsertCoin);
 //       on<SelectProduct>(_onSelectProduct);
 //       on<Cancel>(_onCancel);
@@ -264,37 +263,38 @@ class VendingCubit extends Cubit<VendingStateModel> {
     'B2': VendingProduct('Chips', 2.00, 3),
   };
 
-  VendingCubit() : super(const IdleState());
+  VendingState _currentState = const IdleState();
 
-  VendingState get _state => state as VendingState;
+  VendingCubit() : super(const IdleModel());
 
-  void _apply(VendingStateModel next) {
-    if (identical(state, next)) return;
-    emit(next);
-    if (next is DispensingModel) _dispense(next);
+  void _apply(VendingState next) {
+    if (identical(_currentState, next)) return;
+    _currentState = next;
+    emit(next.model);
+    if (next is DispensingState) _dispense(next);
   }
 
-  void insertCoin(double amount) => _apply(_state.insertCoin(amount));
-  void selectProduct(String code) =>
-      _apply(_state.selectProduct(code, _inventory));
-  void cancel() => _apply(_state.cancel());
+  void insertCoin(double amount)  => _apply(_currentState.insertCoin(amount));
+  void selectProduct(String code) => _apply(_currentState.selectProduct(code, _inventory));
+  void cancel()                   => _apply(_currentState.cancel());
 
-  void _dispense(DispensingModel dispensing) {
-    final product = _inventory[dispensing.code]!;
-    final change = dispensing.balance - product.price;
+  void _dispense(DispensingState dispensing) {
+    final product = _inventory[dispensing.model.code]!;
+    final change = dispensing.model.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
     if (product.stock == 0) print('  ${product.name} now out of stock.');
-    emit(const IdleState());
+    _currentState = const IdleState();
+    emit(const IdleModel());
   }
 }
 
 // ─────────────────────────────────────────────
 // Riverpod — Notifier<VendingStateModel> (package:riverpod)
 //
-// Delegates to VendingState — same approach as VendingCubit. _apply sets
-// the Notifier state= and triggers _dispense when it is a DispensingModel.
+// Same split as VendingCubit: _currentState tracks the VendingState;
+// state= sets the VendingStateModel for reactive subscribers.
 // ─────────────────────────────────────────────
 
 class VendingNotifier extends Notifier<VendingStateModel> {
@@ -303,30 +303,31 @@ class VendingNotifier extends Notifier<VendingStateModel> {
     'B2': VendingProduct('Chips', 2.00, 3),
   };
 
+  VendingState _currentState = const IdleState();
+
   @override
-  VendingStateModel build() => const IdleState();
+  VendingStateModel build() => const IdleModel();
 
-  VendingState get _state => state as VendingState;
-
-  void _apply(VendingStateModel next) {
-    if (identical(state, next)) return;
-    state = next;
-    if (next is DispensingModel) _dispense(next);
+  void _apply(VendingState next) {
+    if (identical(_currentState, next)) return;
+    _currentState = next;
+    state = next.model;
+    if (next is DispensingState) _dispense(next);
   }
 
-  void insertCoin(double amount) => _apply(_state.insertCoin(amount));
-  void selectProduct(String code) =>
-      _apply(_state.selectProduct(code, _inventory));
-  void cancel() => _apply(_state.cancel());
+  void insertCoin(double amount)  => _apply(_currentState.insertCoin(amount));
+  void selectProduct(String code) => _apply(_currentState.selectProduct(code, _inventory));
+  void cancel()                   => _apply(_currentState.cancel());
 
-  void _dispense(DispensingModel dispensing) {
-    final product = _inventory[dispensing.code]!;
-    final change = dispensing.balance - product.price;
+  void _dispense(DispensingState dispensing) {
+    final product = _inventory[dispensing.model.code]!;
+    final change = dispensing.model.balance - product.price;
     print('  Dispensing ${product.name}...');
     product.stock--;
     if (change > 0) print('  Change returned: \$${change.toStringAsFixed(2)}');
     if (product.stock == 0) print('  ${product.name} now out of stock.');
-    state = const IdleState();
+    _currentState = const IdleState();
+    state = const IdleModel();
   }
 }
 
